@@ -1,15 +1,15 @@
 port module Server exposing (..)
 
-import Webapp.Server
-import Webapp.Server.HTTP exposing (Method(..), Request, Response, StatusCode(..))
 import Json.Decode
 import Json.Encode
 import Platform exposing (Task)
-import Task
-import Time
 import Protocol exposing (MsgFromServer)
 import Protocol.Auto
+import Task
+import Time
 import Url
+import Webapp.Server
+import Webapp.Server.HTTP exposing (Method(..), Request, Response, StatusCode(..))
 
 
 
@@ -52,7 +52,10 @@ main =
             , updateFromRoute = updateFromRoute
             , updateFromClient = updateFromClient
             , serverMsgEncoder = Protocol.Auto.encodeProtocolMsgFromServer
-            , clientMsgDecoder = Protocol.Auto.decodeProtocolMsgFromClient
+            , clientMsgDecoder =
+                Json.Decode.oneOf
+                    [ Protocol.Auto.decodeProtocolMsgFromClient
+                    ]
             , headerDecoder = headerDecoder
             , errorEncoder = Json.Encode.string
             }
@@ -66,8 +69,7 @@ type alias Flags =
 
 
 type alias ServerState =
-    { greeting : String
-    , jsSha : String
+    { jsSha : String
     , assetsHost : String
     }
 
@@ -84,8 +86,7 @@ init : Flags -> ( ServerState, Cmd Msg )
 init flags =
     let
         serverState =
-            { greeting = "Hello world"
-            , jsSha = Maybe.withDefault "" flags.jsSha
+            { jsSha = Maybe.withDefault "" flags.jsSha
             , assetsHost = Maybe.withDefault "" flags.assetsHost
             }
 
@@ -116,6 +117,7 @@ subscriptions serverState =
 
 type Route
     = Homepage
+    | ApiElmWebapp
 
 
 routeDecoder : Url.Url -> Maybe Route
@@ -123,6 +125,9 @@ routeDecoder urlUrl =
     case urlUrl.path of
         "/" ->
             Just Homepage
+
+        "/api/elm-webapp" ->
+            Just ApiElmWebapp
 
         _ ->
             Nothing
@@ -146,8 +151,25 @@ updateFromRoute ( method, ctx, route ) now request serverState =
                 }
             )
 
+        ( POST, _, Just ApiElmWebapp ) ->
+            -- fall thru here when framework was unable to decodeTypesMsgFromClient
+            -- most likely reason: client and server version mismatch
+            ( serverState
+            , writeResponse request
+                { statusCode = StatusOK
+                , body =
+                    Json.Encode.encode 0
+                        (Json.Encode.list Json.Encode.string
+                            [ "ClientServerVersionMismatch"
+                            , Webapp.Server.HTTP.bodyOf request
+                            ]
+                        )
+                , headers = []
+                }
+            )
+
         -- TODO: possibly a (POST, _, Login) to "Set-Cookie"
-        ( _, _, _ ) ->
+        _ ->
             ( serverState
             , writeResponse request { statusCode = StatusNotFound, body = "Not found?", headers = [] }
             )
@@ -160,10 +182,15 @@ updateFromRoute ( method, ctx, route ) now request serverState =
 updateFromClient : Protocol.RequestContext -> Time.Posix -> Protocol.MsgFromClient -> ServerState -> ( ServerState, Task String MsgFromServer )
 updateFromClient ctx now clientMsg serverState =
     case clientMsg of
-        Protocol.SetGreeting s ->
-            ( { serverState | greeting = s }
-            , Task.succeed (Protocol.CurrentGreeting ("You said: <" ++ s ++ "> at " ++ Debug.toString now))
-            )
+        Protocol.ManyMsgFromClient msglist ->
+            -- Handling a batched list of `MsgFromClient`
+            let
+                overStateAndTask nextMsg ( currentState, accumulatedTasks ) =
+                    updateFromClient ctx now nextMsg currentState
+                        |> Tuple.mapSecond (\nextTask -> nextTask :: accumulatedTasks)
+            in
+            List.foldl overStateAndTask ( serverState, [] ) msglist
+                |> Tuple.mapSecond (Task.sequence >> Task.map Protocol.ManyMsgFromServer)
 
 
 

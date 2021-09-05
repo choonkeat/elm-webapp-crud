@@ -15,20 +15,22 @@ run: compile
 
 compile: elm.json package.json src/Protocol/Auto.elm build/Server.js public/assets/client.js
 
-src/Protocol/Auto.elm: src/Protocol.elm
+src/Protocol/Auto.elm: $(shell find src/Protocol.elm src/Protocol -iname '*.elm')
 	#
-	# for every type in `src/Protocol.elm`
-	# generate a json encoder/decoder in `src/Protocol/Auto.elm`
-	#
+	# generate json encoder/decoder for every type in src/Protocol
 	# read more at https://github.com/choonkeat/elm-auto-encoder-decoder
 	#
-	WATCHING=false elm-auto-encoder-decoder src/Protocol.elm
+	EXTRA_IMPORT='Extra.Auto exposing (..)' \
+	GENERATED_SRC=generated-src \
+	WATCHING=false \
+	elm-auto-encoder-decoder `find src/Protocol.elm src/Protocol -iname '*.elm'`
 
 build/Server.js: src/*.elm src/**/*.elm
 	elm make src/Server.elm --output build/Server.js
 
+CLIENT_COMPILE_FLAGS=--debug
 public/assets/client.js: src/*.elm src/**/*.elm
-	elm make src/Client.elm --output public/assets/client.js
+	elm make src/Client.elm $(CLIENT_COMPILE_FLAGS) --output public/assets/client.js
 
 #
 
