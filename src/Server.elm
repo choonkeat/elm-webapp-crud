@@ -1,10 +1,13 @@
 port module Server exposing (..)
 
+import Dict exposing (Dict)
 import Json.Decode
 import Json.Encode
 import Platform exposing (Task)
 import Protocol exposing (MsgFromServer)
 import Protocol.Auto
+import Protocol.Foobar
+import Server.FoobarAPI
 import Task
 import Time
 import Url
@@ -71,6 +74,7 @@ type alias Flags =
 type alias ServerState =
     { jsSha : String
     , assetsHost : String
+    , foobars : Dict String Protocol.Foobar.Foobar
     }
 
 
@@ -88,6 +92,7 @@ init flags =
         serverState =
             { jsSha = Maybe.withDefault "" flags.jsSha
             , assetsHost = Maybe.withDefault "" flags.assetsHost
+            , foobars = Dict.empty
             }
 
         cmd =
@@ -191,6 +196,9 @@ updateFromClient ctx now clientMsg serverState =
             in
             List.foldl overStateAndTask ( serverState, [] ) msglist
                 |> Tuple.mapSecond (Task.sequence >> Task.map Protocol.ManyMsgFromServer)
+
+        Protocol.MsgFromFoobar m ->
+            Server.FoobarAPI.updateFromClient ctx now m serverState
 
 
 
